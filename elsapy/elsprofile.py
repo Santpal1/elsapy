@@ -29,43 +29,40 @@ class ElsProfile(ElsEntity, metaclass=ABCMeta):
         return self._doc_list
 
     @abstractmethod
-    def read_docs(self, payloadType, els_client = None):
-        """Fetches the list of documents associated with this entity from
-            api.elsevier.com. If need be, splits the requests in batches to
-            retrieve them all. Returns True if successful; else, False.
-			NOTE: this method requires elevated API permissions.
-			See http://bit.ly/2leirnq for more info."""
+    def read_docs(self, payloadType, els_client=None):
+        """Fetches the list of documents associated with this entity from api.elsevier.com.
+        Returns True if successful; else, False.
+        """
         if els_client:
-            self._client = els_client;
+            self._client = els_client
         elif not self.client:
-            raise ValueError('''Entity object not currently bound to els_client instance. Call .read() with els_client argument or set .client attribute.''')
+            raise ValueError(
+                "Entity object not currently bound to els_client instance."
+            )
+
         try:
-            api_response = self.client.exec_request(self.uri + "?view=documents")
-            if isinstance(api_response[payloadType], list):
-                data = api_response[payloadType][0]
-            else:
-                data = api_response[payloadType]
-            docCount = int(data["documents"]["@total"])
-            self._doc_list = [x for x in data["documents"]["abstract-document"]]
-            for i in range (0, docCount//self.client.num_res):
-                try:
-                    api_response = self.client.exec_request(self.uri + "?view=documents&startref=" + str((i+1) * self.client.num_res+1))
-                    if isinstance(api_response[payloadType], list):
-                        data = api_response[payloadType][0]
-                    else:
-                        data = api_response[payloadType]
-                    self._doc_list = self._doc_list + [x for x in data["documents"]["abstract-document"]]
-                except  (requests.HTTPError, requests.RequestException) as e:
-                    if hasattr(self, 'doc_list'):       ## We don't want incomplete doc lists
-                        self._doc_list = None
-                    raise e
-            logger.info("Documents loaded for " + self.uri)
+            # 🔹 Use the 'search' endpoint instead of 'self.uri'
+            search_url = f"http://api.elsevier.com/content/search/scopus?query=au-id({self.uri.split('/')[-1]})&view=COMPLETE"
+
+            api_response = self.client.exec_request(search_url)
+            # print("API Response:", json.dumps(api_response, indent=4))  # Debugging
+
+            # 🔹 Extract documents properly from 'search-results'
+            self._doc_list = api_response.get("search-results", {}).get("entry", [])
+
+            print(f"Extracted {len(self._doc_list)} documents.")  # Debugging
+            if not self._doc_list:
+                print("No documents found. Check API response format.")
+
+            logger.info(f"Documents loaded for {self.uri}: {len(self._doc_list)} found.")
             self.docsframe = recast_df(pd.DataFrame(self._doc_list))
-            logger.info("Documents loaded into dataframe for " + self.uri)
+            logger.info(f"Documents loaded into dataframe for {self.uri}.")
             return True
+
         except (requests.HTTPError, requests.RequestException) as e:
             logger.warning(e.args)
             return False
+
 
     def write_docs(self):
         """If a doclist exists for the entity, writes it to disk as a JSON file
